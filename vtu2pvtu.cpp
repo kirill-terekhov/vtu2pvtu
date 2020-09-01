@@ -5,6 +5,7 @@
 #include <set>
 #include <sstream>
 #include <cmath>
+#include <limits>
 
 std::string tolower(std::string input)
 {
@@ -45,24 +46,23 @@ template<typename dtype>
 void transferdata(std::istream & f, std::ostream & fh, size_t nelems, std::vector<int> & epart, int part, int comps)
 {
 	size_t wr = 0;
-	fh << "\t\t\t";
 	for(size_t q = 0; q < nelems; ++q)
 	{
 		dtype v;
 		if( epart[q] == part )
 		{
-			
+			if( wr % (16 / comps) == 0 ) fh << "\t\t\t\t  ";
 			for(int c = 0; c < comps; ++c)
 			{
 				f >> v; 
 				fh << v << " ";
 			}
 			wr++;
-			if( wr % (16 / comps) == 0 ) fh << std::endl << "\t\t\t";
+			if( wr % (16 / comps) == 0 ) fh << std::endl;
 		}
 		else  for(int c = 0; c < comps; ++c) f >> v;
 	}
-	fh << std::endl;
+	if( wr % (16 / comps) != 0 ) fh << std::endl;
 }
 
 int main(int argc, char **argv)
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
 		std::ifstream f(input.c_str());
 		{
 			XMLReader reader(input, f);
-			reader.SetVerbosity(2);
+			//~ reader.SetVerbosity(2);
 			XMLReader::XMLTag root = reader.OpenTag();
 			if( root.name != "VTKFile" )
 			{
@@ -135,6 +135,13 @@ int main(int argc, char **argv)
 				}
 				//else reader.Report("Unused attribute for %s %s='%s'",root.name.c_str(),attr.name.c_str(),attr.value.c_str());
 			}
+			
+			if( reader.isFailure() ) 
+			{
+				reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+				return -1;
+			}
+			
 			XMLReader::XMLTag subroot = reader.OpenTag();
 			
 			if( subroot.name != "UnstructuredGrid" )
@@ -143,15 +150,29 @@ int main(int argc, char **argv)
 				return -1;
 			}
 			
+			if( reader.isFailure() ) 
+			{
+				reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+				return -1;
+			}
 			for(XMLReader::XMLTag piece = reader.OpenTag(); !piece.Finalize() && piece.name == "Piece"; reader.CloseTag(piece), piece = reader.OpenTag())
 			{
-				std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+				if( reader.isFailure() ) 
+				{
+					reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+					return -1;
+				}
 				for(int q = 0; q < piece.NumAttrib(); ++q)
 				{
 					const XMLReader::XMLAttrib & attr = piece.GetAttrib(q);
 					if( tolower(attr.name) == "numberofpoints" ) convertstr(attr.value,npoints);
 					else if( tolower(attr.name) == "numberofcells" ) convertstr(attr.value,ncells);
 					//else reader.Report("Unused attribute for %s %s='%s'",piece.name.c_str(),attr.name.c_str(),attr.value.c_str());
+				}
+				if( reader.isFailure() ) 
+				{
+					reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+					return -1;
 				}
 				if( npoints == 0 )
 				{
@@ -169,7 +190,11 @@ int main(int argc, char **argv)
 				
 				for(XMLReader::XMLTag sub = reader.OpenTag(); !sub.Finalize(); sub = reader.OpenTag())
 				{
-					std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+					if( reader.isFailure() ) 
+					{
+						reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+						return -1;
+					}
 					if( sub.name == "Points" )
 					{
 						XMLReader::XMLTag data = reader.OpenTag();
@@ -221,6 +246,11 @@ int main(int argc, char **argv)
 					{
 						for(XMLReader::XMLTag data = reader.OpenTag(); !data.Finalize(); data = reader.OpenTag())
 						{
+							if( reader.isFailure() ) 
+							{
+								reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+								return -1;
+							}
 							if( data.name != "DataArray" )
 							{
 								reader.Report("Expected tag DataArray instead of %s.",data.name.c_str());
@@ -245,18 +275,26 @@ int main(int argc, char **argv)
 										pos_offsets = f.tellg();
 									else if( attr.value == "types" )
 										pos_types = f.tellg();
-									convertstr(attr.value,dims);
 								}
 								//else reader.Report("Unused attribute for %s %s='%s'",data.name.c_str(),attr.name.c_str(),attr.value.c_str());
 							}
 							reader.SkipTag(data.name);
+						}
+						if( !reader.CloseTag(sub) )
+						{
+							reader.Report("Failed closing XML tag %s.",sub.name);
+							return -1;
 						}
 					}
 					else if( sub.name == "PointData" )
 					{
 						for(XMLReader::XMLTag data = reader.OpenTag(); !data.Finalize(); data = reader.OpenTag())
 						{
-							std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+							if( reader.isFailure() ) 
+							{
+								reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+								return -1;
+							}
 							if( data.name != "DataArray" )
 							{
 								reader.Report("Expected tag DataArray instead of %s.",data.name.c_str());
@@ -284,14 +322,22 @@ int main(int argc, char **argv)
 							}
 							pointdata_pos.push_back(f.tellg());
 							reader.SkipTag(data.name);
-							std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+						}
+						if( !reader.CloseTag(sub) )
+						{
+							reader.Report("Failed closing XML tag %s.",sub.name);
+							return -1;
 						}
 					}
 					else if( sub.name == "CellData" )
 					{
 						for(XMLReader::XMLTag data = reader.OpenTag(); !data.Finalize(); data = reader.OpenTag())
 						{
-							std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+							if( reader.isFailure() ) 
+							{
+								reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
+								return -1;
+							}
 							if( data.name != "DataArray" )
 							{
 								reader.Report("Expected tag DataArray instead of %s.",data.name.c_str());
@@ -319,7 +365,11 @@ int main(int argc, char **argv)
 							}
 							celldata_pos.push_back(f.tellg());
 							reader.SkipTag(data.name);
-							std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+						}
+						if( !reader.CloseTag(sub) )
+						{
+							reader.Report("Failed closing XML tag %s.",sub.name);
+							return -1;
 						}
 					}
 					else reader.SkipTag(sub.name);
@@ -339,7 +389,7 @@ int main(int argc, char **argv)
 			std::vector< int > cluster_npoints(parts,0);
 			//select seed points for clusters
 			{
-				srand(0);
+				srand(time(NULL));
 				for(int i = 0; i < parts; i++) if( cluster_npoints[i] == 0 )
 				{
 					while(true)
@@ -386,6 +436,7 @@ int main(int argc, char **argv)
 						changed++;
 					}
 				}
+				std::cout << "iter " << iter << " changed " << changed << std::endl;
 				//no change in cluster positions
 				if(changed == 0 || iter >= max_iterations)
 					break;
@@ -429,26 +480,42 @@ int main(int argc, char **argv)
 		std::cout << "Compute partitioning for cells and extension for nodes." << std::endl;
 		
 		//read cell by cell and setup cell partitioning
-		std::vector<int> cpart(ncells,-1);
+		std::vector<int> cpart(ncells,std::numeric_limits<int>::min());
 		std::vector< std::set<size_t> > epoints(parts); //additional nodes that should present on processor
 		{
 			std::streampos pos_connectivity_running = pos_connectivity;
 			std::streampos pos_offsets_running = pos_offsets;
-			size_t offset, point;
+			size_t offset, offset0 = 0, size, point;
 			std::vector<size_t> conns;
 			for(size_t i = 0; i < ncells; ++i)
 			{
 				f.seekg(pos_offsets_running);
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
 				f >> offset;
+				size = offset-offset0;
+				offset0 = offset;
+				//~ std::cout << "offset: " << offset << std::endl;
 				pos_offsets_running = f.tellg();
 				f.seekg(pos_connectivity_running);
-				for(size_t k = 0; k < offset; ++k)
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
+				//~ std::cout << "connections: " << std::endl;
+				for(size_t k = 0; k < size; ++k)
 				{
 					f >> point;
+					//~ std::cout << point << " ";
 					cpart[i] = std::max(cpart[i],ppart[point]);
 					conns.push_back(point);
 				}
-				for(size_t k = 0; k < offset; ++k)
+				//~ std::cout << std::endl;
+				for(size_t k = 0; k < size; ++k)
 				{
 					if( cpart[i] != ppart[conns[k]] )
 						epoints[cpart[i]].insert(conns[k]);
@@ -475,38 +542,49 @@ int main(int argc, char **argv)
 		for(size_t k = 0; k < pointdata_name.size(); ++k)
 		{
 			fh << "\t\t\t<PDataArray";
-			fh << " Name=\"" << pointdata_name[k] << "\"";
 			fh << " type=\"" << pointdata_type[k] << "\"";
-			fh << " format=\"ascii\"";
+			fh << " Name=\"" << pointdata_name[k] << "\"";
+			fh << " Format=\"ascii\"";
 			if( pointdata_comps[k] != 1 )
 				fh << " NumberOfComponents=\"" << pointdata_comps[k] << "\"";
 			fh << "/>" << std::endl;
 		}
+		fh << "\t\t\t<PDataArray";
+		fh << " type=\"Int32\"";
+		fh << " Name=\"part\"";
+		fh << " Format=\"ascii\"";
+		fh << "/>" << std::endl;
 		fh << "\t\t</PPointData>" << std::endl;
 		fh << "\t\t<PCellData>" << std::endl;
 		for(size_t k = 0; k < celldata_name.size(); ++k)
 		{
 			fh << "\t\t\t<PDataArray";
-			fh << " Name=\"" << celldata_name[k] << "\"";
 			fh << " type=\"" << celldata_type[k] << "\"";
-			fh << " format=\"ascii\"";
+			fh << " Name=\"" << celldata_name[k] << "\"";
+			fh << " Format=\"ascii\"";
 			if( celldata_comps[k] != 1 )
 				fh << " NumberOfComponents=\"" << celldata_comps[k] << "\"";
 			fh << "/>" << std::endl;
 		}
+		fh << "\t\t\t<PDataArray";
+		fh << " type=\"Int32\"";
+		fh << " Name=\"part\"";
+		fh << " Format=\"ascii\"";
+		fh << "/>" << std::endl;
 		fh << "\t\t</PCellData>" << std::endl;
+		fh << "\t\t<PPoints>" << std::endl;
 		fh << "\t\t\t<PDataArray";
 		fh << " type=\"Float32\"";
 		fh << " NumberOfComponents=\"" << dims << "\"";
-		fh << " format=\"ascii\"";
+		fh << " Format=\"ascii\"";
 		fh << "/>" << std::endl;
-		fh << "\t\t<PPointsData>" << std::endl;
-		fh << "\t\t</PPointsData>" << std::endl;
+		fh << "\t\t</PPoints>" << std::endl;
 		
 		std::vector<size_t> pnum(npoints); //index of point
 		std::vector<int> ppartk(npoints);
 		std::string filename;
 		int digits = getdigits(parts), digitsk = 0;
+		size_t wr;
 		for(int k = 0; k < parts; ++k)
 		{
 			//mark nodes that should be in the part
@@ -536,7 +614,7 @@ int main(int argc, char **argv)
 			std::ofstream fo(filename.c_str());
 			
 			fo << "<VTKFile type=\"UnstructuredGrid\">" << std::endl;
-			fo << "\t<UnstrcturedGrid>" << std::endl;
+			fo << "\t<UnstructuredGrid>" << std::endl;
 			fo << "\t\t<Piece NumberOfPoints=\"" << npointsk << "\" NumberOfCells=\"" << ncellsk << "\">" << std::endl;
 			
 			std::cout << "Write points data for partition " << k << std::endl;
@@ -544,16 +622,20 @@ int main(int argc, char **argv)
 			fo << "\t\t\t<PointData>" << std::endl;
 			for(size_t m = 0; m < pointdata_name.size(); ++m)
 			{
-				fo << "\t\t\t<DataArray";
-				fo << " Name=\"" << pointdata_name[m] << "\"";
+				fo << "\t\t\t\t<DataArray";
 				fo << " type=\"" << pointdata_type[m] << "\"";
-				fo << " format=\"ascii\"";
+				fo << " Name=\"" << pointdata_name[m] << "\"";
+				fo << " Format=\"ascii\"";
 				if( pointdata_comps[m] != 1 )
 					fo << " NumberOfComponents=\"" << pointdata_comps[m] << "\"";
 				fo << ">" << std::endl;
 				
 				f.seekg(pointdata_pos[m]);
-				
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
 				if( pointdata_type[m] == "Float64" )
 					transferdata<double>(f,fo,npoints,ppartk,k,pointdata_comps[m]);
 				else if( pointdata_type[m] == "Float32" )
@@ -575,8 +657,26 @@ int main(int argc, char **argv)
 				else if( pointdata_type[m] == "UInt8" )
 					transferdata<uint8_t>(f,fo,npoints,ppartk,k,pointdata_comps[m]);
 				
-				fo << "\t\t\t</DataArray>" << std::endl;
+				fo << "\t\t\t\t</DataArray>" << std::endl;
 			}
+			fo << "\t\t\t\t<DataArray";
+			fo << " type=\"Int32\"";
+			fo << " Name=\"part\"";
+			fo << " Format=\"ascii\"";
+			fo << ">" << std::endl;
+			wr = 0;
+			for(size_t m = 0; m < npoints; ++m)
+			{
+				if( ppartk[m] == k )
+				{
+					if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
+					fo << ppart[m] << " ";
+					wr++;
+					if( wr % 16 == 0 ) fo << std::endl;
+				}
+			}
+			if( wr % 16 != 0 ) fo << std::endl;
+			fo << "\t\t\t\t</DataArray>" << std::endl;
 			fo << "\t\t\t</PointData>" << std::endl;
 			
 			std::cout << "Write cell data for partition " << k << std::endl;
@@ -585,128 +685,169 @@ int main(int argc, char **argv)
 			
 			for(size_t m = 0; m < celldata_name.size(); ++m)
 			{
-				fo << "\t\t\t<DataArray";
-				fo << " Name=\"" << celldata_name[m] << "\"";
+				fo << "\t\t\t\t<DataArray";
 				fo << " type=\"" << celldata_type[m] << "\"";
-				fo << " format=\"ascii\"";
+				fo << " Name=\"" << celldata_name[m] << "\"";
+				fo << " Format=\"ascii\"";
 				if( celldata_comps[m] != 1 )
 					fo << " NumberOfComponents=\"" << pointdata_comps[m] << "\"";
 				fo << ">" << std::endl;
 				
 				f.seekg(celldata_pos[m]);
-				
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
 				if( celldata_type[m] == "Float64" )
 					transferdata<double>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "Float32" )
-					transferdata<float>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<float>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "Int64" )
-					transferdata<int64_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<int64_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "UInt64" )
-					transferdata<uint64_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<uint64_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "Int32" )
-					transferdata<int32_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<int32_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "UInt32" )
-					transferdata<uint32_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<uint32_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "Int16" )
-					transferdata<int16_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<int16_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "UInt16" )
-					transferdata<uint16_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<uint16_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "Int8" )
-					transferdata<int8_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<int8_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				else if( celldata_type[m] == "UInt8" )
-					transferdata<uint8_t>(f,fo,ncells,ppartk,k,celldata_comps[m]);
+					transferdata<uint8_t>(f,fo,ncells,cpart,k,celldata_comps[m]);
 				
-				fh << "\t\t\t</DataArray>" << std::endl;
+				fo << "\t\t\t\t</DataArray>" << std::endl;
 			}
+			fo << "\t\t\t\t<DataArray";
+			fo << " type=\"Int32\"";
+			fo << " Name=\"part\"";
+			fo << " Format=\"ascii\"";
+			fo << ">" << std::endl;
+			wr = 0;
+			for(size_t m = 0; m < ncells; ++m)
+			{
+				if( cpart[m] == k )
+				{
+					if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
+					fo << k << " ";
+					wr++;
+					if( wr % 16 == 0 ) fo << std::endl;
+				}
+			}
+			if( wr % 16 != 0 ) fo << std::endl;
+			fo << "\t\t\t\t</DataArray>" << std::endl;
 			
 			fo << "\t\t\t</CellData>" << std::endl;
 			
 			std::cout << "Write points coordinates for partition " << k << std::endl;
 			
 			fo << "\t\t\t<Points>" << std::endl;
-			fo << "\t\t\t\t<DataArray NumberOfComponents=\"" << dims << "\" format=\"ascii\">" << std::endl;
-			size_t wr = 0;
-			fo << "\t\t\t\t";
+			fo << "\t\t\t\t<DataArray type=\"Float32\" NumberOfComponents=\"" << dims << "\" Format=\"ascii\">" << std::endl;
+			wr = 0;
 			for(size_t m = 0; m < npoints; ++m)	
 			{
-				if( ppart[m] == k )
+				if( ppartk[m] == k )
 				{
+					if( wr % (16/dims) == 0 ) fo << "\t\t\t\t  ";
 					for(int d = 0; d < dims; ++d)
 						fo << coords[m*dims + d] << " ";
 					wr++;
-					if( wr % (16/dims) == 0 ) fo << std::endl << "\t\t\t\t";
+					if( wr % (16/dims) == 0 ) fo << std::endl;
 				}
 			}
-			fo << std::endl;
+			if( wr % (16/dims) != 0 ) fo << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
 			fo << "\t\t\t</Points>" << std::endl;
 			
 			std::cout << "Write cells connectivity for partition " << k << std::endl;
 			
 			fo << "\t\t\t<Cells>" << std::endl;
-			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"connectivity\" format=\"ascii\">" << std::endl;
+			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"connectivity\" Format=\"ascii\">" << std::endl;
 			std::vector<size_t> offsets;
 			{
 				std::streampos pos_connectivity_running = pos_connectivity;
 				std::streampos pos_offsets_running = pos_offsets;
-				size_t offset, point;
+				size_t offset, offset0 = 0, size, point;
 				wr = 0;
-				fo << "\t\t\t\t";
 				for(size_t m = 0; m < ncells; ++m)
 				{
 					f.seekg(pos_offsets_running);
+					if( f.fail() ) 
+					{
+						std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+						return -1;
+					}
 					f >> offset;
+					size = offset-offset0;
+					offset0 = offset;
 					pos_offsets_running = f.tellg();
 					f.seekg(pos_connectivity_running);
+					if( f.fail() ) 
+					{
+						std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+						return -1;
+					}
 					if( cpart[m] == k )
 					{
-						for(size_t q = 0; q < offset; ++q)
+						for(size_t q = 0; q < size; ++q)
 						{
 							f >> point;
+							if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
 							fo << pnum[point] << " ";
 							wr++;
-							if( wr % 16 == 0 ) fo << std::endl << "\t\t\t\t";
+							if( wr % 16 == 0 ) fo << std::endl;
 							if( ppartk[point] != k )
 								std::cout << "Error, connection to point " << point << " from cell " << m << " didn't get correct part number, got " << ppartk[point] << std::endl;
 							if( pnum[point] == -1 )
 								std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
 						}
-						offsets.push_back(offset);
+						offsets.push_back(wr);
 					}
-					else for(size_t q = 0; q < offset; ++q)
+					else for(size_t q = 0; q < size; ++q)
 						f >> point;
 					pos_connectivity_running = f.tellg();
 				}
-				fo << std::endl;
+				if( wr % 16 != 0 ) fo << std::endl;
 			}
 			if( offsets.size() != ncellsk )
 				std::cout << "Error, number of offsets " << offsets.size() << " does not match number of local cells " << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
-			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"offsets\" format=\"ascii\">" << std::endl;
-			fo << "\t\t\t\t";
+			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"offsets\" Format=\"ascii\">" << std::endl;
+			wr = 0;
 			for(size_t m = 0; m < ncellsk; ++m)
 			{
+				if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
 				fo << offsets[m] << " ";
-				if( (m+1) % 16 == 0 ) fo << std::endl << "\t\t\t\t";
+				wr++;
+				if( wr % 16 == 0 ) fo << std::endl;
 			}
-			fo << std::endl;
+			if( wr % 16 != 0 ) fo << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
-			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"types\" format=\"ascii\">" << std::endl;
+			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"types\" Format=\"ascii\">" << std::endl;
 			f.seekg(pos_types);
 			int ctype;
 			wr = 0;
-			fo << "\t\t\t\t";
 			for(size_t m = 0; m < ncells; ++m)	
 			{
 				f >> ctype;
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
 				if( cpart[m] == k )
 				{
+					if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
 					fo << ctype << " ";
 					wr++;
-					if( wr % 16 == 0 ) fo << std::endl << "\t\t\t\t";
+					if( wr % 16 == 0 ) fo << std::endl;
 				}
 			}
-			fo << std::endl;
+			if( wr % 16 != 0 ) fo << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
 			fo << "\t\t\t</Cells>" << std::endl;
 			fo << "\t\t</Piece>" << std::endl;
