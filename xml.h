@@ -18,43 +18,43 @@ class XMLReader
 			return "";
 		else return file.substr(0,found);
 	}
-    struct Stream
-    {
-      std::string src;
-      std::istream * input;
-      int linebreak, linechar;
-      int hadlinebreak, hadlinechar;
-    };
-    std::vector<Stream> inp;
-    int verbose;
-    enum State
-    {
-      Intro, //read tag or read tag contents
-      WaitTag, //wait tag name or comment
-      ReadTag, //reading in tag name
-      ReadCommentExclamation, //skipping comments
-      ReadCommentQuestion, //skipping comments
-      WaitAttribute, //reading attribute name
-      ReadAttribute,
-      WaitAttributeValue, //read attribute value
-      ReadAttributeValue,
-      ReadAttributeValueQuote,
-      EndTag, //tag ended read closing
-      WaitCloseTag,
-      ReadCloseTagSlash,
-      ReadCloseTagName,
-      EndOfFile, // end of file reached
-      Failure //unexpected error
-    } _state;
-    Stream & GetStream() {return inp.back();}
-    const Stream & GetStream() const {return inp.back();}
-    std::istream & GetInputStream() {return *inp.back().input;}
-    const std::istream & GetInputStream() const {return *inp.back().input;}
-    //should not share the reference to the stream with another reader
-    XMLReader(const XMLReader & other) {}
-    XMLReader & operator =(XMLReader & other) {return *this;}
-    char GetChar()
-    {
+	struct Stream
+	{
+		std::string src;
+		std::istream * input;
+		int linebreak, linechar;
+		int hadlinebreak, hadlinechar;
+	};
+	std::vector<Stream> inp;
+	int verbose;
+	enum State
+	{
+		Intro, //read tag or read tag contents
+		WaitTag, //wait tag name or comment
+		ReadTag, //reading in tag name
+		ReadCommentExclamation, //skipping comments
+		ReadCommentQuestion, //skipping comments
+		WaitAttribute, //reading attribute name
+		ReadAttribute,
+		WaitAttributeValue, //read attribute value
+		ReadAttributeValue,
+		ReadAttributeValueQuote,
+		EndTag, //tag ended read closing
+		WaitCloseTag,
+		ReadCloseTagSlash,
+		ReadCloseTagName,
+		EndOfFile, // end of file reached
+		Failure //unexpected error
+	} _state;
+	Stream & GetStream() {return inp.back();}
+	const Stream & GetStream() const {return inp.back();}
+	std::istream & GetInputStream() {return *inp.back().input;}
+	const std::istream & GetInputStream() const {return *inp.back().input;}
+	//should not share the reference to the stream with another reader
+	XMLReader(const XMLReader & other) {}
+	XMLReader & operator =(XMLReader & other) {return *this;}
+	char GetChar()
+	{
 		char c = '\0';
 		GetInputStream().get(c);
 		GetStream().hadlinebreak = GetStream().linebreak;
@@ -83,9 +83,9 @@ class XMLReader
 		}
 		return c;
 	}
-    //return one character back to the stream
-    void RetChar()
-    {
+	//return one character back to the stream
+	void RetChar()
+	{
 		GetStream().linebreak = GetStream().hadlinebreak;
 		GetStream().linechar = GetStream().hadlinechar;
 		GetInputStream().unget();
@@ -96,7 +96,7 @@ class XMLReader
 			_state = Failure;
 		}
 	}
-    void SkipComments(State RetState)
+	void SkipComments(State RetState)
     {
 		int ntmp = 0;
 		char tmp[3] = {'\0','\0','\0'};
@@ -183,8 +183,8 @@ class XMLReader
 	/// 2 - lot's of output
 	/// 1 - output key steps, currently in ReadXML
 	void SetVerbosity(int verbosity) {verbose = verbosity;}
-    void Report(const char * fmt, ...) const
-    { 
+	void Report(const char * fmt, ...) const
+	{ 
 		std::cout << GetStream().src << ":row:" << GetStream().linebreak << ":col:" << GetStream().linechar << " ";
 		{
 			char stext[16384];
@@ -197,7 +197,7 @@ class XMLReader
 		}
 		std::cout << std::endl;
 	}
-    XMLReader(std::string sourcename, std::istream & input) : _state(Intro)
+	XMLReader(std::string sourcename, std::istream & input) : _state(Intro)
 	{
 		Stream add;
 		add.src = sourcename;
@@ -389,9 +389,9 @@ class XMLReader
 		if( verbose > 1 ) Report("info: opened tag %s",ret.c_str());
 		return ret;
 	}
-    //read > or /> skipping for attributes
-    int ReadCloseTag()
-    {
+	//read > or /> skipping for attributes
+	int ReadCloseTag()
+	{
 		char tmp[2];
 		tmp[0] = GetChar();
 		if( tmp[0] == '>' )
@@ -684,9 +684,9 @@ class XMLReader
       int NumAttrib() const {return (int)attributes.size();}
 	  ///Retrive the name of the tag.
 	  std::string GetName() const {return name;}
-    };
-    XMLTag OpenTag()
-    {
+	};
+	XMLTag OpenTag()
+	{
 		std::string include = "";
 		XMLTag ret;
 		XMLAttrib attr;
@@ -721,14 +721,9 @@ class XMLReader
 					ret.finish = ReadCloseTag(); //retrive '>'
 					if( !include.empty() )
 					{
-
 						std::string folder = GetFolder(GetStream().src);
-						if (!folder.empty()) {
-							folder += "/";
-						}
-
+						if (!folder.empty()) folder += "/";
 						if( verbose > 1 ) Report("info: switching to stream %s",(folder + include).c_str());
-
 						PushStream((folder + include).c_str()); //switch to the included file
 					}
 				}
@@ -743,9 +738,8 @@ class XMLReader
 		if( verbose > 1 ) Report("info: return tag %s flag %d",ret.name.c_str(),ret.finish);
 		return ret;
 	}
-    
-    bool CloseTag(XMLTag & tag)
-    {
+	bool CloseTag(XMLTag & tag)
+	{
 		if( tag.finish == 3 ) 
 		{
 			Report("%s:%d Trying to close the tag that is beyond the last tag",__FILE__,__LINE__);
@@ -765,7 +759,6 @@ class XMLReader
 		XMLTag tag; //< tag information, such as name and attributes.
 		std::vector<XMLTree> children; //< Children inside XML tag.
 		std::string contents; //< Text inside of the tag.
-
 		///Return next occurance of XML tag with the specified
 		///name. Returns NumChildren() if not found.
 		int FindChild(std::string name, int offset = -1) const
