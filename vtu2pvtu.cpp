@@ -92,7 +92,7 @@ int main(int argc, char **argv)
 		//read all the coordinates
 		size_t npoints = 0, ncells = 0;
 		int dims = 0;
-		std::vector<float> coords;
+		std::vector<float> pcoords;
 		//file positions
 		std::streampos pos_connectivity = 0, pos_offsets = 0, pos_types = 0;
 		//data
@@ -225,11 +225,11 @@ int main(int argc, char **argv)
 						
 						std::cout << dims << " dimensions." << std::endl;
 						
-						coords.resize(npoints*dims,0.f);
+						pcoords.resize(npoints*dims,0.f);
 						for(size_t k = 0; k < npoints*dims; ++k)
 						{
 							std::string tmp = reader.GetWord('<');
-							convertstr(tmp,coords[k]);
+							convertstr(tmp,pcoords[k]);
 						}
 						if( !reader.CloseTag(data) )
 						{
@@ -380,10 +380,47 @@ int main(int argc, char **argv)
 			reader.CloseTag(root);
 		}
 		
-		std::cout << "Cluster nodes into " << parts << " parts." << std::endl;
+		std::cout << "Calculate centers of cells." << std::endl;
+		
+		std::vector<float> ccoords(ncells*dims,0.f);
+		{
+			std::streampos pos_connectivity_running = pos_connectivity;
+			std::streampos pos_offsets_running = pos_offsets;
+			size_t offset, offset0 = 0, size, point;
+			for(size_t i = 0; i < ncells; ++i)
+			{
+				f.seekg(pos_offsets_running);
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
+				f >> offset;
+				size = offset-offset0;
+				offset0 = offset;
+				pos_offsets_running = f.tellg();
+				f.seekg(pos_connectivity_running);
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
+				for(size_t k = 0; k < size; ++k)
+				{
+					f >> point;
+					for(int q = 0; q < dims; ++q)
+						ccoords[i*dims+q] += pcoords[point*dims+q];					
+				}
+				for(int q = 0; q < dims; ++q)
+					ccoords[i*dims+q] /= static_cast<float>(size);
+				pos_connectivity_running = f.tellg();
+			}
+		}
+		
+		std::cout << "Cluster cell centers into " << parts << " parts." << std::endl;
 		
 		//separate points by processors with K-means
-		std::vector< int > ppart(npoints,-1);
+		std::vector< int > cpart(ncells,-1);
 		{
 			std::vector< float > cluster_coords(parts*dims,0.0);
 			std::vector< int > cluster_npoints(parts,0);
@@ -394,12 +431,12 @@ int main(int argc, char **argv)
 				{
 					while(true)
 					{
-						size_t index_point = rand() % npoints;
-						if(ppart[index_point] == -1)
+						size_t index = rand() % ncells;
+						if(cpart[index] == -1)
 						{
 							for(int k = 0; k < dims; ++k)
-								cluster_coords[i*dims + k] = coords[index_point*dims + k];
-							ppart[index_point] = i;
+								cluster_coords[i*dims + k] = ccoords[index*dims + k];
+							cpart[index] = i;
 							break;
 						}
 					}
@@ -412,9 +449,9 @@ int main(int argc, char **argv)
 				int changed = 0;
 				// associates each point to the nearest center
 #pragma omp parallel for reduction(+:changed)
-				for(size_t i = 0; i < npoints; i++)
+				for(size_t i = 0; i < ncells; i++)
 				{
-					int id_old_cluster = ppart[i];
+					int id_old_cluster = cpart[i];
 					int id_nearest_center = -1;
 					
 					float lmin = 1.0e+100;
@@ -423,7 +460,7 @@ int main(int argc, char **argv)
 					{
 						float l = 0;
 						for(int k = 0; k < dims; ++k)
-							l += pow(coords[i*dims+k] - cluster_coords[j*dims+k],2);
+							l += pow(ccoords[i*dims+k] - cluster_coords[j*dims+k],2);
 						if( l < lmin )
 						{
 							lmin = l;
@@ -432,7 +469,7 @@ int main(int argc, char **argv)
 					}					
 					if(id_old_cluster != id_nearest_center)
 					{
-						ppart[i] = id_nearest_center;
+						cpart[i] = id_nearest_center;
 						changed++;
 					}
 				}
@@ -452,11 +489,11 @@ int main(int argc, char **argv)
 					std::vector< float > local_cluster_coords(parts*dims,0.0);
 					std::vector< int > local_npoints(parts,0);
 #pragma omp for
-					for(size_t j = 0; j < npoints; ++j)
+					for(size_t j = 0; j < ncells; ++j)
 					{
 						for(int k = 0; k < dims; ++k)
-							local_cluster_coords[ppart[j]*dims+k] += coords[j*dims+k];
-						local_npoints[ppart[j]]++;
+							local_cluster_coords[cpart[j]*dims+k] += ccoords[j*dims+k];
+						local_npoints[cpart[j]]++;
 					}
 #pragma omp critical
 					{
@@ -471,22 +508,20 @@ int main(int argc, char **argv)
 				for(int i = 0; i < parts; i++)
 				{
 					for(int k = 0; k < dims; ++k)
-						cluster_coords[i*dims+k] /= (float) cluster_npoints[i];
+						cluster_coords[i*dims+k] /= static_cast<float>(cluster_npoints[i]);
 				}
 				iter++;
 			}
 		}
 		
-		std::cout << "Compute partitioning for cells and extension for nodes." << std::endl;
+		std::cout << "Collect nodes for each part." << std::endl;
 		
-		//read cell by cell and setup cell partitioning
-		std::vector<int> cpart(ncells,std::numeric_limits<int>::min());
-		std::vector< std::set<size_t> > epoints(parts); //additional nodes that should present on processor
+		//read cell by cell and setup partitioning for nodes
+		std::vector<int> ppart(npoints,-1);
 		{
 			std::streampos pos_connectivity_running = pos_connectivity;
 			std::streampos pos_offsets_running = pos_offsets;
 			size_t offset, offset0 = 0, size, point;
-			std::vector<size_t> conns;
 			for(size_t i = 0; i < ncells; ++i)
 			{
 				f.seekg(pos_offsets_running);
@@ -498,7 +533,6 @@ int main(int argc, char **argv)
 				f >> offset;
 				size = offset-offset0;
 				offset0 = offset;
-				//~ std::cout << "offset: " << offset << std::endl;
 				pos_offsets_running = f.tellg();
 				f.seekg(pos_connectivity_running);
 				if( f.fail() ) 
@@ -506,32 +540,50 @@ int main(int argc, char **argv)
 					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
 					return -1;
 				}
-				//~ std::cout << "connections: " << std::endl;
 				for(size_t k = 0; k < size; ++k)
 				{
 					f >> point;
-					//~ std::cout << point << " ";
-					cpart[i] = std::max(cpart[i],ppart[point]);
-					conns.push_back(point);
-				}
-				//~ std::cout << std::endl;
-				for(size_t k = 0; k < size; ++k)
-				{
-					if( cpart[i] != ppart[conns[k]] )
-						epoints[cpart[i]].insert(conns[k]);
+					ppart[point] = std::max(ppart[point],cpart[i]);
 				}
 				pos_connectivity_running = f.tellg();
-				conns.clear();
 			}
 		}
 		
-		std::cout << "Count local nodes and cells." << std::endl;
-		std::vector<size_t> pcnt(parts,0); //number of points per part
-		std::vector<size_t> ccnt(parts,0); //number of cells per part
-		for(size_t k = 0; k < npoints; ++k)
-			pcnt[ppart[k]]++;
-		for(size_t k = 0; k < ncells; ++k)
-			ccnt[cpart[k]]++;
+		std::cout << "Compute extra nodes that belong to each partition." << std::endl;
+		
+		std::vector< std::set<size_t> > epoints(parts); //additional nodes that should present on processor
+		//calculate dependence of cells on nodes and mark partitioning
+		{
+			std::streampos pos_connectivity_running = pos_connectivity;
+			std::streampos pos_offsets_running = pos_offsets;
+			size_t offset, offset0 = 0, size, point;
+			for(size_t i = 0; i < ncells; ++i)
+			{
+				f.seekg(pos_offsets_running);
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
+				f >> offset;
+				size = offset-offset0;
+				offset0 = offset;
+				pos_offsets_running = f.tellg();
+				f.seekg(pos_connectivity_running);
+				if( f.fail() ) 
+				{
+					std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+					return -1;
+				}
+				for(size_t k = 0; k < size; ++k)
+				{
+					f >> point;
+					if( cpart[i] != ppart[point] )
+						epoints[cpart[i]].insert(point);
+				}
+				pos_connectivity_running = f.tellg();
+			}
+		}
 		
 		std::cout << "Output header file " << output << std::endl;
 		std::ofstream fh(output.c_str());
@@ -590,7 +642,7 @@ int main(int argc, char **argv)
 			//mark nodes that should be in the part
 			std::cout << "Prepare nodes for partition " << k << std::endl;
 			size_t npointsk = 0;
-			size_t ncellsk = ccnt[k];
+			size_t ncellsk = 0;
 			ppartk = ppart;
 			for(std::set<size_t>::iterator it = epoints[k].begin(); it != epoints[k].end(); ++it)
 				ppartk[*it] = k;
@@ -599,6 +651,9 @@ int main(int argc, char **argv)
 			for(size_t m = 0; m < npoints; ++m)
 				if( ppartk[m] == k ) pnum[m] = npointsk++;
 				else pnum[m] = -1;
+				
+			for(size_t m = 0; m < ncells; ++m)
+				if( cpart[m] == k ) ncellsk++;
 			
 			digitsk = getdigits(k);
 			filename = output.substr(0,output.size()-5); //strip .pvtu
@@ -754,7 +809,7 @@ int main(int argc, char **argv)
 				{
 					if( wr % (16/dims) == 0 ) fo << "\t\t\t\t  ";
 					for(int d = 0; d < dims; ++d)
-						fo << coords[m*dims + d] << " ";
+						fo << pcoords[m*dims + d] << " ";
 					wr++;
 					if( wr % (16/dims) == 0 ) fo << std::endl;
 				}
