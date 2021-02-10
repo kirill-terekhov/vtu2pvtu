@@ -94,7 +94,8 @@ int main(int argc, char **argv)
 		int dims = 0;
 		std::vector<float> pcoords;
 		//file positions
-		std::streampos pos_connectivity = 0, pos_offsets = 0, pos_types = 0;
+		std::streampos pos_connectivity = 0, pos_offsets = 0, pos_types = 0, pos_faces = 0, pos_faceoffsets = 0;
+		bool have_faces = false;
 		//data
 		std::vector<std::string> pointdata_name;
 		std::vector<std::string> pointdata_type;
@@ -155,8 +156,14 @@ int main(int argc, char **argv)
 				reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
 				return -1;
 			}
-			for(XMLReader::XMLTag piece = reader.OpenTag(); !piece.Finalize() && piece.name == "Piece"; reader.CloseTag(piece), piece = reader.OpenTag())
+			for(XMLReader::XMLTag piece = reader.OpenTag(); !piece.Finalize(); piece = reader.OpenTag())
 			{
+				if( piece.name != "Piece" )
+				{
+					reader.Report("Expected Piece tag but got %s",piece.name.c_str());
+					reader.SkipTag(piece.name);
+					continue;
+				}
 				if( reader.isFailure() ) 
 				{
 					reader.Report("Failed reading file at %s:%d",__FILE__,__LINE__);
@@ -231,14 +238,17 @@ int main(int argc, char **argv)
 							std::string tmp = reader.GetWord('<');
 							convertstr(tmp,pcoords[k]);
 						}
+						reader.SkipTag(data.name); //there might be remaining data
+						/*
 						if( !reader.CloseTag(data) )
 						{
-							reader.Report("Failed closing XML tag %s.",sub.name);
+							reader.Report("Failed closing XML tag %s in %s:%d.",sub.name.c_str(),__FILE__,__LINE__);
 							return -1;
 						}
+						*/
 						if( !reader.CloseTag(sub) )
 						{
-							reader.Report("Failed closing XML tag %s.",sub.name);
+							reader.Report("Failed closing XML tag %s in %s:%d.",sub.name.c_str(),__FILE__,__LINE__);
 							return -1;
 						}
 					}
@@ -275,6 +285,16 @@ int main(int argc, char **argv)
 										pos_offsets = f.tellg();
 									else if( attr.value == "types" )
 										pos_types = f.tellg();
+									else if( attr.value == "faces" )
+									{
+										pos_faces = f.tellg();
+										have_faces = true;
+									}
+									else if( attr.value == "faceoffsets" )
+									{
+										pos_faceoffsets = f.tellg();
+										have_faces = true;
+									}
 								}
 								//else reader.Report("Unused attribute for %s %s='%s'",data.name.c_str(),attr.name.c_str(),attr.value.c_str());
 							}
@@ -282,7 +302,7 @@ int main(int argc, char **argv)
 						}
 						if( !reader.CloseTag(sub) )
 						{
-							reader.Report("Failed closing XML tag %s.",sub.name);
+							reader.Report("Failed closing XML tag %s in %s:%d.",sub.name.c_str(),__FILE__,__LINE__);
 							return -1;
 						}
 					}
@@ -325,7 +345,7 @@ int main(int argc, char **argv)
 						}
 						if( !reader.CloseTag(sub) )
 						{
-							reader.Report("Failed closing XML tag %s.",sub.name);
+							reader.Report("Failed closing XML tag %s in %s:%d.",sub.name.c_str(),__FILE__,__LINE__);
 							return -1;
 						}
 					}
@@ -368,11 +388,16 @@ int main(int argc, char **argv)
 						}
 						if( !reader.CloseTag(sub) )
 						{
-							reader.Report("Failed closing XML tag %s.",sub.name);
+							reader.Report("Failed closing XML tag %s in %s:%d.",sub.name.c_str(),__FILE__,__LINE__);
 							return -1;
 						}
 					}
 					else reader.SkipTag(sub.name);
+				}
+				if( !reader.CloseTag(piece) )
+				{
+					reader.Report("Failed closing XML tag %s in %s:%d.",piece.name.c_str(),__FILE__,__LINE__);
+					return -1;
 				}
 			}
 			
@@ -745,7 +770,7 @@ int main(int argc, char **argv)
 				fo << " Name=\"" << celldata_name[m] << "\"";
 				fo << " Format=\"ascii\"";
 				if( celldata_comps[m] != 1 )
-					fo << " NumberOfComponents=\"" << pointdata_comps[m] << "\"";
+					fo << " NumberOfComponents=\"" << celldata_comps[m] << "\"";
 				fo << ">" << std::endl;
 				
 				f.seekg(celldata_pos[m]);
@@ -822,7 +847,7 @@ int main(int argc, char **argv)
 			
 			fo << "\t\t\t<Cells>" << std::endl;
 			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"connectivity\" Format=\"ascii\">" << std::endl;
-			std::vector<size_t> offsets;
+			//~ std::vector<size_t> offsets;
 			{
 				std::streampos pos_connectivity_running = pos_connectivity;
 				std::streampos pos_offsets_running = pos_offsets;
@@ -860,7 +885,8 @@ int main(int argc, char **argv)
 							if( pnum[point] == -1 )
 								std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
 						}
-						offsets.push_back(wr);
+						//~ fo << std::endl;
+						//~ offsets.push_back(wr);
 					}
 					else for(size_t q = 0; q < size; ++q)
 						f >> point;
@@ -868,20 +894,38 @@ int main(int argc, char **argv)
 				}
 				if( wr % 16 != 0 ) fo << std::endl;
 			}
-			if( offsets.size() != ncellsk )
-				std::cout << "Error, number of offsets " << offsets.size() << " does not match number of local cells " << std::endl;
+			//~ if( offsets.size() != ncellsk )
+				//~ std::cout << "Error, number of offsets " << offsets.size() << " does not match number of local cells " << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
+			
+			std::cout << "Write cells offsets for partition " << k << std::endl;
+			
 			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"offsets\" Format=\"ascii\">" << std::endl;
 			wr = 0;
-			for(size_t m = 0; m < ncellsk; ++m)
 			{
-				if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
-				fo << offsets[m] << " ";
-				wr++;
-				if( wr % 16 == 0 ) fo << std::endl;
+				size_t offset, offset0 = 0, size, offsetr = 0;
+				f.seekg(pos_offsets);
+				for(size_t m = 0; m < ncells; ++m)
+				{
+					//~ fo << offsets[m] << " ";
+					f >> offset;
+					size = offset - offset0;
+					offset0 = offset;
+					if( cpart[m] == k )
+					{
+						offsetr += size;
+						if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
+						fo << offsetr << " ";
+						wr++;
+						if( wr % 16 == 0 ) fo << std::endl;
+					}
+				}
+				if( wr % 16 != 0 ) fo << std::endl;
 			}
-			if( wr % 16 != 0 ) fo << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
+			
+			std::cout << "Write cells types for partition " << k << std::endl;
+			
 			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"types\" Format=\"ascii\">" << std::endl;
 			f.seekg(pos_types);
 			int ctype;
@@ -904,6 +948,94 @@ int main(int argc, char **argv)
 			}
 			if( wr % 16 != 0 ) fo << std::endl;
 			fo << "\t\t\t\t</DataArray>" << std::endl;
+			if( have_faces )
+			{
+				size_t offset, offset0 = 0, size, offsetr = 0;
+				f.seekg(pos_faceoffsets);
+				std::cout << "Write cells faces offsets for partition " << k << std::endl;
+				fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"faceoffsets\" Format=\"ascii\">" << std::endl;
+				wr = 0;
+				for(size_t m = 0; m < ncells; ++m)
+				{
+					f >> offset;
+					size = offset - offset0;
+					offset0 = offset;
+					if( cpart[m] == k )
+					{
+						offsetr += size;
+						if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
+						fo << offsetr << " ";
+						wr++;
+						if( wr % 16 == 0 ) fo << std::endl;
+					}
+				}
+				if( wr % 16 != 0 ) fo << std::endl;
+				fo << "\t\t\t\t</DataArray>" << std::endl;
+				std::streampos pos_faces_running = pos_faces;
+				std::streampos pos_faceoffsets_running = pos_faceoffsets;
+				size_t point, nfaces, npoints, reads;
+				offset0 = 0;
+				std::cout << "Write cells faces connectivity for partition " << k << std::endl;
+				fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"faces\" Format=\"ascii\">" << std::endl;
+				wr = 0;
+				for(size_t m = 0; m < ncells; ++m)
+				{
+					f.seekg(pos_faceoffsets_running);
+					if( f.fail() ) 
+					{
+						std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+						return -1;
+					}
+					f >> offset;
+					pos_faceoffsets_running = f.tellg();
+					if( offset == -1 ) continue;
+					size = offset-offset0;
+					offset0 = offset;
+					f.seekg(pos_faces_running);
+					if( f.fail() ) 
+					{
+						std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
+						return -1;
+					}
+					if( cpart[m] == k )
+					{
+						f >> nfaces;
+						if( nfaces+1 > size ) std::cout << "Error, something is inconsistent, total reads " << size << " but number of faces " << nfaces << std::endl;
+						reads = 1;
+						fo << "\t\t\t\t  ";
+						fo << nfaces << " ";
+						//~ std::cout << "nfaces " << nfaces;
+						for(size_t q = 0; q < nfaces; ++q)
+						{
+							f >> npoints;
+							reads++;
+							fo << npoints << " ";
+							//~ std::cout << " " << npoints;
+							for(size_t p = 0; p < npoints; ++p)
+							{
+								f >> point;
+								reads++;
+								fo << pnum[point] << " ";
+								if( ppartk[point] != k )
+									std::cout << "Error, connection to point " << point << " from cell " << m << " didn't get correct part number, got " << ppartk[point] << std::endl;
+								if( pnum[point] == -1 )
+									std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
+							}
+							if( reads > size ) std::cout << "Error, something is inconsistent, total reads " << size << " but current reads " << reads << " number of faces " << nfaces << " points in face " << npoints << std::endl;
+						}
+						fo << std::endl;
+						//~ std::cout << std::endl;
+						if( reads != size )
+							std::cout << "Error, inconsistent number of reads " << reads << " with offset size " << size << std::endl;
+					}
+					else for(size_t q = 0; q < size; ++q)
+						f >> point;
+					pos_faces_running = f.tellg();
+				}
+				fo << "\t\t\t\t</DataArray>" << std::endl;
+				
+				std::cout << "Done with cells faces for partition " << k << std::endl;
+			}
 			fo << "\t\t\t</Cells>" << std::endl;
 			fo << "\t\t</Piece>" << std::endl;
 			fo << "\t</UnstructuredGrid>" << std::endl;
