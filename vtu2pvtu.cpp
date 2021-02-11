@@ -6,6 +6,9 @@
 #include <sstream>
 #include <cmath>
 #include <limits>
+#include <ctime>
+#include <cstdlib>
+#include <algorithm>
 
 std::string tolower(std::string input)
 {
@@ -474,12 +477,12 @@ int main(int argc, char **argv)
 				int changed = 0;
 				// associates each point to the nearest center
 #pragma omp parallel for reduction(+:changed)
-				for(size_t i = 0; i < ncells; i++)
+				for(int64_t i = 0; i < static_cast<int64_t>(ncells); i++)
 				{
 					int id_old_cluster = cpart[i];
 					int id_nearest_center = -1;
 					
-					float lmin = 1.0e+100;
+					float lmin = std::numeric_limits<float>::max();
 					
 					for(int j = 0; j < parts; ++j)
 					{
@@ -514,7 +517,7 @@ int main(int argc, char **argv)
 					std::vector< float > local_cluster_coords(parts*dims,0.0);
 					std::vector< int > local_npoints(parts,0);
 #pragma omp for
-					for(size_t j = 0; j < ncells; ++j)
+					for(int64_t j = 0; j < static_cast<int64_t>(ncells); ++j)
 					{
 						for(int k = 0; k < dims; ++k)
 							local_cluster_coords[cpart[j]*dims+k] += ccoords[j*dims+k];
@@ -926,7 +929,7 @@ int main(int argc, char **argv)
 			
 			std::cout << "Write cells types for partition " << k << std::endl;
 			
-			fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"types\" Format=\"ascii\">" << std::endl;
+			fo << "\t\t\t\t<DataArray type=\"UInt8\" Name=\"types\" Format=\"ascii\">" << std::endl;
 			f.seekg(pos_types);
 			int ctype;
 			wr = 0;
