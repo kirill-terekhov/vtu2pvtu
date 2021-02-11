@@ -459,7 +459,7 @@ int main(int argc, char **argv)
 				{
 					while(true)
 					{
-						size_t index = rand() % ncells;
+						size_t index = (rand()*rand()) % ncells;
 						if(cpart[index] == -1)
 						{
 							for(int k = 0; k < dims; ++k)
@@ -665,6 +665,7 @@ int main(int argc, char **argv)
 		std::string filename;
 		int digits = getdigits(parts), digitsk = 0;
 		size_t wr;
+		size_t mone_size_t = -1;
 		for(int k = 0; k < parts; ++k)
 		{
 			//mark nodes that should be in the part
@@ -678,7 +679,7 @@ int main(int argc, char **argv)
 			std::cout << "Enumerate nodes for partition " << k << std::endl;
 			for(size_t m = 0; m < npoints; ++m)
 				if( ppartk[m] == k ) pnum[m] = npointsk++;
-				else pnum[m] = -1;
+				else pnum[m] = mone_size_t;
 				
 			for(size_t m = 0; m < ncells; ++m)
 				if( cpart[m] == k ) ncellsk++;
@@ -885,7 +886,7 @@ int main(int argc, char **argv)
 							if( wr % 16 == 0 ) fo << std::endl;
 							if( ppartk[point] != k )
 								std::cout << "Error, connection to point " << point << " from cell " << m << " didn't get correct part number, got " << ppartk[point] << std::endl;
-							if( pnum[point] == -1 )
+							if( pnum[point] == mone_size_t )
 								std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
 						}
 						//~ fo << std::endl;
@@ -991,7 +992,7 @@ int main(int argc, char **argv)
 					}
 					f >> offset;
 					pos_faceoffsets_running = f.tellg();
-					if( offset == -1 ) continue;
+					if( offset == mone_size_t ) continue;
 					size = offset-offset0;
 					offset0 = offset;
 					f.seekg(pos_faces_running);
@@ -1021,7 +1022,7 @@ int main(int argc, char **argv)
 								fo << pnum[point] << " ";
 								if( ppartk[point] != k )
 									std::cout << "Error, connection to point " << point << " from cell " << m << " didn't get correct part number, got " << ppartk[point] << std::endl;
-								if( pnum[point] == -1 )
+								if( pnum[point] == mone_size_t )
 									std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
 							}
 							if( reads > size ) std::cout << "Error, something is inconsistent, total reads " << size << " but current reads " << reads << " number of faces " << nfaces << " points in face " << npoints << std::endl;
