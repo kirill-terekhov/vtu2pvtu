@@ -1284,7 +1284,7 @@ int main(int argc, char **argv)
 		
 		
 		for(int k = 0; k < parts; ++k)
-			fh << "\t\t<Piece Source=\"" << filenames[k] << "\"/>" << std::endl; 
+			fh << "\t\t<Piece Source=\"" << filenames[k].substr(filenames[k].find_last_of("/\\")+1,filenames[k].length()) << "\"/>" << std::endl; 
 		
 		fh << "\t</PUnstructuredGrid>" << std::endl;
 		fh << "</VTKFile>" << std::endl;
