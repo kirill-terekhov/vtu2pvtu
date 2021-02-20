@@ -253,7 +253,7 @@ int main(int argc, char **argv)
 			//file positions
 			{ //scope to release connectivity information 
 				std::streampos pos_connectivity = 0, pos_offsets = 0, pos_types = 0, pos_faces = 0, pos_faceoffsets = 0;
-				std::vector<float> pcoords; //read all the coordinates
+				std::vector<double> pcoords; //read all the coordinates
 				bool load_data = true; //read connectivity information into memory
 				bool have_faces = false;
 				std::vector<size_t> offsets;
@@ -599,7 +599,7 @@ int main(int argc, char **argv)
 				std::cout << "Calculate centers of cells." << std::endl;
 				
 				{ //scope for ccoords memory release
-					std::vector<float> ccoords(ncells*dims,0.f);
+					std::vector<double> ccoords(ncells*dims,0.f);
 					{
 						std::streampos pos_connectivity_running = pos_connectivity;
 						std::streampos pos_offsets_running = pos_offsets;
@@ -628,7 +628,7 @@ int main(int argc, char **argv)
 							}
 							offset0 = offset;
 							for(int q = 0; q < dims; ++q)
-								ccoords[i*dims+q] /= static_cast<float>(size);
+								ccoords[i*dims+q] /= static_cast<double>(size);
 							if( !load_data )
 							{
 								pos_connectivity_running = f.tellg();
@@ -642,7 +642,7 @@ int main(int argc, char **argv)
 					//separate points by processors with K-means
 					cpart.resize(ncells,-1);
 					{
-						std::vector< float > cluster_coords(parts*dims,0.0);
+						std::vector< double > cluster_coords(parts*dims,0.0);
 						std::vector< int > cluster_npoints(parts,0);
 						//select seed points for clusters
 						{
@@ -674,11 +674,11 @@ int main(int argc, char **argv)
 								int id_old_cluster = cpart[i];
 								int id_nearest_center = -1;
 								
-								float lmin = std::numeric_limits<float>::max();
+								double lmin = std::numeric_limits<double>::max();
 								
 								for(int j = 0; j < parts; ++j)
 								{
-									float l = 0;
+									double l = 0;
 									for(int k = 0; k < dims; ++k)
 										l += pow(ccoords[i*dims+k] - cluster_coords[j*dims+k],2);
 									if( l < lmin )
@@ -706,7 +706,7 @@ int main(int argc, char **argv)
 							// recalculating the center of each cluster
 #pragma omp parallel
 							{
-								std::vector< float > local_cluster_coords(parts*dims,0.0);
+								std::vector< double > local_cluster_coords(parts*dims,0.0);
 								std::vector< int > local_npoints(parts,0);
 #pragma omp for
 								for(int64_t j = 0; j < static_cast<int64_t>(ncells); ++j)
@@ -728,7 +728,7 @@ int main(int argc, char **argv)
 							for(int i = 0; i < parts; i++)
 							{
 								for(int k = 0; k < dims; ++k)
-									cluster_coords[i*dims+k] /= static_cast<float>(cluster_npoints[i]);
+									cluster_coords[i*dims+k] /= static_cast<double>(cluster_npoints[i]);
 							}
 							iter++;
 						}
@@ -848,7 +848,7 @@ int main(int argc, char **argv)
 					std::cout << "Write points coordinates for partition " << k << std::endl;
 					
 					fo << "\t\t\t<Points>" << std::endl;
-					fo << "\t\t\t\t<DataArray type=\"Float32\" NumberOfComponents=\"" << dims << "\" Format=\"ascii\">" << std::endl;
+					fo << "\t\t\t\t<DataArray type=\"Float64\" NumberOfComponents=\"" << dims << "\" Format=\"ascii\">" << std::endl;
 					wr = 0;
 					for(size_t m = 0; m < npoints; ++m)	
 					{
@@ -1242,7 +1242,7 @@ int main(int argc, char **argv)
 		fh << "\t<PUnstructuredGrid GhostLevel=\"0\">" << std::endl;
 		fh << "\t\t<PPoints>" << std::endl;
 		fh << "\t\t\t<PDataArray";
-		fh << " type=\"Float32\"";
+		fh << " type=\"Float64\"";
 		fh << " NumberOfComponents=\"" << dims << "\"";
 		fh << " Format=\"ascii\"";
 		fh << "/>" << std::endl;
