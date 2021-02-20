@@ -646,7 +646,7 @@ int main(int argc, char **argv)
 						std::vector< int > cluster_npoints(parts,0);
 						//select seed points for clusters
 						{
-							srand(time(NULL));
+							srand((unsigned int)time(NULL));
 							for(int i = 0; i < parts; i++) if( cluster_npoints[i] == 0 )
 							{
 								while(true)

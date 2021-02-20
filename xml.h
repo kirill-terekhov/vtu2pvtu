@@ -191,7 +191,7 @@ class XMLReader
 			va_list ap;
 			if ( fmt == NULL ) {std::cout << std::endl; return;}
 			va_start(ap,fmt);
-			vsprintf(stext,fmt,ap);
+			vsnprintf(stext,16384,fmt,ap);
 			va_end(ap);
 			std::cout << stext;
 		}
@@ -915,7 +915,7 @@ class XMLReader
 		while( cnt != 0 );
 		_state = Intro; //wait for next tag
 	}
-	std::string GetWord(bool stop = '\0')
+	std::string GetWord(char stop = '\0')
 	{
 		std::string ret;
 		char c = GetChar();
