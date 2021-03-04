@@ -1,6 +1,7 @@
 #include "xml.h"
 #include <string>
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <set>
 #include <sstream>
@@ -202,7 +203,7 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		const int max_iterations = 30; //maximum iterations for K-means clustering
+		const int max_iterations = 200; //maximum iterations for K-means clustering
 		std::string input = std::string(argv[1]);
 		std::string output = "output.pvtu";
 		int parts = atoi(argv[2]);
@@ -636,14 +637,37 @@ int main(int argc, char **argv)
 							}
 						}
 					}
-					
+					double box[6] = {0,0,0,0,0,0};
+					std::cout << "Find out bounding box " << std::endl;
+					for(int j = 0; j < dims; ++j)
+					{
+						box[j*2+0] = 1.0e+20;
+						box[j*2+1] =-1.0e+20;
+					}
+					for(size_t i = 0; i < ncells; i++)
+					{
+						for(int j = 0; j < dims; ++j)
+						{
+							box[j*2+0] = std::min(box[j*2+0],ccoords[i*dims+j]);
+							box[j*2+1] = std::max(box[j*2+1],ccoords[i*dims+j]);
+						}
+					}
+					char XYZ[3] = {'x','y','z'};
+					double mesh_dist = 0;
+					for(int j = 0; j < dims; ++j)
+					{
+						mesh_dist += pow(box[j*2+1] - box[j*2+0],2);
+						std::cout << XYZ[j] << " " << std::setw(14) << box[j*2+0] << ":" << std::setw(14) << box[j*2+1] << std::endl;
+					}
+					mesh_dist = sqrt(mesh_dist);
+					std::cout << "Mesh distance: " << mesh_dist << std::endl;
 					std::cout << "Cluster cell centers into " << parts << " parts." << std::endl;
-					
 					//separate points by processors with K-means
 					cpart.resize(ncells,-1);
 					{
+						std::vector< double > cluster_weight(parts,1.0/static_cast<double>(parts));
 						std::vector< double > cluster_coords(parts*dims,0.0);
-						std::vector< int > cluster_npoints(parts,0);
+						std::vector< size_t > cluster_npoints(parts,0);
 						//select seed points for clusters
 						{
 							srand((unsigned int)time(NULL));
@@ -651,7 +675,10 @@ int main(int argc, char **argv)
 							{
 								while(true)
 								{
-									size_t index = (rand()*rand()) % ncells;
+									size_t r1 = rand();
+									size_t r2 = rand();
+									size_t r3 = rand();
+									size_t index = (r1*r2*r3) % ncells;
 									if(cpart[index] == -1)
 									{
 										for(int k = 0; k < dims; ++k)
@@ -666,7 +693,7 @@ int main(int argc, char **argv)
 						int iter = 1;
 						while(true)
 						{
-							int changed = 0;
+							size_t changed = 0;
 							// associates each point to the nearest center
 #pragma omp parallel for reduction(+:changed)
 							for(int64_t i = 0; i < static_cast<int64_t>(ncells); i++)
@@ -678,7 +705,7 @@ int main(int argc, char **argv)
 								
 								for(int j = 0; j < parts; ++j)
 								{
-									double l = 0;
+									double l = pow(0.5*mesh_dist*cluster_weight[j],2);
 									for(int k = 0; k < dims; ++k)
 										l += pow(ccoords[i*dims+k] - cluster_coords[j*dims+k],2);
 									if( l < lmin )
@@ -693,10 +720,17 @@ int main(int argc, char **argv)
 									changed++;
 								}
 							}
-							std::cout << "iter " << iter << " changed " << changed << std::endl;
 							//no change in cluster positions
-							if(changed == 0 || iter >= max_iterations)
+							if(changed == 0 )
+							{
+								std::cout << "No cluster change after interation - break!" << std::endl;
 								break;
+							}
+							if( iter >= max_iterations )
+							{
+								std::cout << "Maximal number of iterations reached - break!" << std::endl;
+								break;
+							}
 							for(int i = 0; i < parts; i++)
 							{
 								for(int k = 0; k < dims; ++k)
@@ -707,7 +741,7 @@ int main(int argc, char **argv)
 #pragma omp parallel
 							{
 								std::vector< double > local_cluster_coords(parts*dims,0.0);
-								std::vector< int > local_npoints(parts,0);
+								std::vector< size_t > local_npoints(parts,0);
 #pragma omp for
 								for(int64_t j = 0; j < static_cast<int64_t>(ncells); ++j)
 								{
@@ -725,11 +759,18 @@ int main(int argc, char **argv)
 									}
 								}
 							}
+							size_t max_points = cluster_npoints[0], min_points = cluster_npoints[0]; 
 							for(int i = 0; i < parts; i++)
 							{
 								for(int k = 0; k < dims; ++k)
 									cluster_coords[i*dims+k] /= static_cast<double>(cluster_npoints[i]);
+								max_points = std::max(max_points,cluster_npoints[i]);
+								min_points = std::min(min_points,cluster_npoints[i]);
+								cluster_weight[i] = static_cast<double>(cluster_npoints[i])/static_cast<double>(ncells);
+								//std::cout << std::setw(8) << cluster_npoints[i] << "," << std::setw(13) << cluster_weight[i] << " ";
 							}
+							//std::cout << std::endl;
+							std::cout << "iter " << iter << " changed " << changed << " balance " << static_cast<double>(max_points)/static_cast<double>(min_points) << std::endl;
 							iter++;
 						}
 					}
