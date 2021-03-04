@@ -3,7 +3,7 @@
 #include <iostream>
 #include <iomanip>
 #include <vector>
-#include <set>
+#include <map>
 #include <sstream>
 #include <cmath>
 #include <limits>
@@ -125,7 +125,7 @@ void releasedata(std::string dtype, void * data)
 }
 
 template<typename dtype>
-void transferdata(std::ostream & fh, size_t nelems, int comps, const std::vector<int> & epart, const std::set<size_t>& exte, int part, std::vector<dtype> * data)
+void transferdata(std::ostream & fh, size_t nelems, int comps, const std::vector<int> & epart, const std::map<size_t,size_t>& exte, int part, std::vector<dtype> * data)
 {
 	size_t wr = 0;
 	for(size_t q = 0; q < nelems; ++q)
@@ -142,7 +142,7 @@ void transferdata(std::ostream & fh, size_t nelems, int comps, const std::vector
 	if( wr % (16 / comps) != 0 ) fh << std::endl;
 }
 
-void transferdata(std::ostream & f, size_t nelems, int comps, const std::vector<int> & epart, const std::set<size_t>& exte, int part, std::string dtype, void * data)
+void transferdata(std::ostream & f, size_t nelems, int comps, const std::vector<int> & epart, const std::map<size_t,size_t>& exte, int part, std::string dtype, void * data)
 {
 	if( dtype == "Float64" )
 		return transferdata(f,nelems,comps,epart,exte,part,static_cast<std::vector<double> *>(data));
@@ -172,7 +172,7 @@ void transferdata(std::ostream & f, size_t nelems, int comps, const std::vector<
 }
 
 template<typename dtype>
-void transferdata(std::istream & f, std::ostream & fh, size_t nelems, const std::vector<int> & epart, const std::set<size_t> & exte, int part, int comps)
+void transferdata(std::istream & f, std::ostream & fh, size_t nelems, const std::vector<int> & epart, const std::map<size_t,size_t> & exte, int part, int comps)
 {
 	size_t wr = 0;
 	for(size_t q = 0; q < nelems; ++q)
@@ -249,7 +249,7 @@ int main(int argc, char **argv)
 		
 		{//scope for node partitioning info
 			std::vector<int> ppart;
-			std::vector< std::set<size_t> > epoints(parts); //additional nodes that should present on processor
+			std::vector< std::map<size_t,size_t> > epoints(parts); //additional nodes that should present on processor
 			
 			//file positions
 			{ //scope to release connectivity information 
@@ -705,7 +705,7 @@ int main(int argc, char **argv)
 								
 								for(int j = 0; j < parts; ++j)
 								{
-									double l = pow(0.5*mesh_dist*cluster_weight[j],2);
+									double l = pow(0.1*mesh_dist*cluster_weight[j],2);
 									for(int k = 0; k < dims; ++k)
 										l += pow(ccoords[i*dims+k] - cluster_coords[j*dims+k],2);
 									if( l < lmin )
@@ -762,12 +762,20 @@ int main(int argc, char **argv)
 							size_t max_points = cluster_npoints[0], min_points = cluster_npoints[0]; 
 							for(int i = 0; i < parts; i++)
 							{
-								for(int k = 0; k < dims; ++k)
-									cluster_coords[i*dims+k] /= static_cast<double>(cluster_npoints[i]);
 								max_points = std::max(max_points,cluster_npoints[i]);
 								min_points = std::min(min_points,cluster_npoints[i]);
 								cluster_weight[i] = static_cast<double>(cluster_npoints[i])/static_cast<double>(ncells);
 								//std::cout << std::setw(8) << cluster_npoints[i] << "," << std::setw(13) << cluster_weight[i] << " ";
+								if( cluster_npoints[i] == 0 ) //cluster lost!!!
+								{
+									for(int k = 0; k < dims; ++k)
+									{
+										double r = static_cast<double>(rand())/static_cast<double>(RAND_MAX);
+										cluster_coords[i*3+k] = box[k*2+1]*r + box[k*2+0]*(1-r);
+									}
+								}
+								else for(int k = 0; k < dims; ++k)
+									cluster_coords[i*dims+k] /= static_cast<double>(cluster_npoints[i]);
 							}
 							//std::cout << std::endl;
 							std::cout << "iter " << iter << " changed " << changed << " balance " << static_cast<double>(max_points)/static_cast<double>(min_points) << std::endl;
@@ -842,7 +850,7 @@ int main(int argc, char **argv)
 								point = connectivity[offset0+k];
 							else f >> point;
 							if( cpart[i] != ppart[point] )
-								epoints[cpart[i]].insert(point);
+								epoints[cpart[i]].insert(std::make_pair(point,mone_size_t));
 						}
 						offset0 = offset;
 						if( !load_data )
@@ -854,35 +862,43 @@ int main(int argc, char **argv)
 				}
 			
 				std::vector<size_t> pnum(npoints); //index of point
+				std::vector<size_t> npointsk(parts,0); //number of points per partition
+				std::vector<size_t> ncellsk(parts,0); //number of cells per partition
 				size_t wr;
+				std::cout << "Prepare and enumerate nodes and cells for partitions " << std::endl;
+				
+				for(size_t m = 0; m < ncells; ++m)
+					ncellsk[cpart[m]]++;
+#pragma omp parallel for
 				for(int k = 0; k < parts; ++k)
 				{
-					//mark nodes that should be in the part
-					std::cout << "Prepare nodes for partition " << k << std::endl;
-					size_t npointsk = 0;
-					size_t ncellsk = 0;
-
-					std::cout << "Enumerate nodes for partition " << k << std::endl;
 					for(size_t m = 0; m < npoints; ++m)
-						if( ppart[m] == k || epoints[k].count(m) ) pnum[m] = npointsk++;
-						else pnum[m] = mone_size_t;
-						
-					for(size_t m = 0; m < ncells; ++m)
-						if( cpart[m] == k ) ncellsk++;
+					{
+						if( ppart[m] == k ) pnum[m] = npointsk[k]++;
+						else if( epoints[k].count(m) ) epoints[k][m] = npointsk[k]++;
+					}						
 					
-					std::cout << "Output file " << filenames[k] << " for part " << k << std::endl;
-					
-					
-					std::cout << npointsk << " nodes" << std::endl;
-					std::cout << ncellsk << " cells" << std::endl;
-					
+				}
+				
+				for(int k = 0; k < parts; ++k)
+					std::cout << "part " << std::setw(4) << k << " has " << std::setw(10) << npointsk[k] << " nodes " << std::setw(10) << ncellsk[k] << " cells " << std::endl;
+				
+				
+				std::cout << "Write geometric data for partitions " << std::endl;
+
+#pragma omp parallel for
+				for(int k = 0; k < parts; ++k)
+				{
+#pragma omp critical
+					std::cout << "Create file " << filenames[k] << " for part " << k << std::endl;
+										
 					std::ofstream fo(filenames[k].c_str());
 					
 					fo << "<VTKFile type=\"UnstructuredGrid\">" << std::endl;
 					fo << "\t<UnstructuredGrid>" << std::endl;
-					fo << "\t\t<Piece NumberOfPoints=\"" << npointsk << "\" NumberOfCells=\"" << ncellsk << "\">" << std::endl;
+					fo << "\t\t<Piece NumberOfPoints=\"" << npointsk[k] << "\" NumberOfCells=\"" << ncellsk[k] << "\">" << std::endl;
 					
-					std::cout << "Write points coordinates for partition " << k << std::endl;
+					
 					
 					fo << "\t\t\t<Points>" << std::endl;
 					fo << "\t\t\t\t<DataArray type=\"Float64\" NumberOfComponents=\"" << dims << "\" Format=\"ascii\">" << std::endl;
@@ -901,15 +917,19 @@ int main(int argc, char **argv)
 					if( wr % (16/dims) != 0 ) fo << std::endl;
 					fo << "\t\t\t\t</DataArray>" << std::endl;
 					fo << "\t\t\t</Points>" << std::endl;
+				}
 					
-					std::cout << "Write cells connectivity for partition " << k << std::endl;
-					
+				std::cout << "Write cells connectivity for partitions " << std::endl;
+#pragma omp parallel for if(load_data) //don't use multiple threads if data was not loaded
+				for(int k = 0; k < parts; ++k)
+				{
+					std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
 					fo << "\t\t\t<Cells>" << std::endl;
 					fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"connectivity\" Format=\"ascii\">" << std::endl;
 					{
 						std::streampos pos_connectivity_running = pos_connectivity;
 						std::streampos pos_offsets_running = pos_offsets;
-						size_t offset, offset0 = 0, size, point;
+						size_t offset, offset0 = 0, size, point, point_pos;
 						wr = 0;
 						for(size_t m = 0; m < ncells; ++m)
 						{
@@ -918,11 +938,11 @@ int main(int argc, char **argv)
 							else
 							{
 								f.seekg(pos_offsets_running);
-								if( f.fail() ) { std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1;}
+								if( f.fail() ) { std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; break;}
 								f >> offset;
 								pos_offsets_running = f.tellg();
 								f.seekg(pos_connectivity_running);
-								if( f.fail() ) { std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1;}
+								if( f.fail() ) { std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; break;}
 							}
 							size = offset-offset0;
 							if( cpart[m] == k )
@@ -932,14 +952,23 @@ int main(int argc, char **argv)
 									if( load_data )
 										point = connectivity[offset0+q];
 									else f >> point;
-									if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
-									fo << pnum[point] << " ";
-									wr++;
-									if( wr % 16 == 0 ) fo << std::endl;
+									
 									if( !(ppart[point] == k || epoints[k].count(point)) )
 										std::cout << "Error, connection to point " << point << " from cell " << m << " didn't get correct part number, got " << ppart[point] << std::endl;
-									if( pnum[point] == mone_size_t )
+									
+									point_pos = mone_size_t;
+									if( ppart[point] == k )
+										point_pos = pnum[point];
+									else if( epoints[k].count(point) )
+										point_pos = epoints[k][point];
+									
+									if( point_pos == mone_size_t )
 										std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
+									
+									if( wr % 16 == 0 ) fo << "\t\t\t\t  ";
+									fo << point_pos << " ";
+									wr++;
+									if( wr % 16 == 0 ) fo << std::endl;
 								}
 							}
 							else if( !load_data ) for(size_t q = 0; q < size; ++q) f >> point;
@@ -947,14 +976,14 @@ int main(int argc, char **argv)
 							if( !load_data )
 							{
 								pos_connectivity_running = f.tellg();
-								if( f.fail() ) { std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1;}
+								if( f.fail() ) { std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; break;}
 							}
 						}
 						if( wr % 16 != 0 ) fo << std::endl;
 					}
 					fo << "\t\t\t\t</DataArray>" << std::endl;
 					
-					std::cout << "Write cells offsets for partition " << k << std::endl;
+					//std::cout << "Write cells offsets for partition " << k << std::endl;
 					
 					fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"offsets\" Format=\"ascii\">" << std::endl;
 					wr = 0;
@@ -982,7 +1011,7 @@ int main(int argc, char **argv)
 					}
 					fo << "\t\t\t\t</DataArray>" << std::endl;
 					
-					std::cout << "Write cells types for partition " << k << std::endl;
+					//std::cout << "Write cells types for partition " << k << std::endl;
 					
 					fo << "\t\t\t\t<DataArray type=\"UInt8\" Name=\"types\" Format=\"ascii\">" << std::endl;
 					wr = 0;
@@ -1008,7 +1037,7 @@ int main(int argc, char **argv)
 					fo << "\t\t\t\t</DataArray>" << std::endl;
 					if( have_faces )
 					{
-						std::cout << "Write cells faces offsets for partition " << k << std::endl;
+						//std::cout << "Write cells faces offsets for partition " << k << std::endl;
 						size_t offset, offset0 = 0, size, offsetr = 0;
 						if( !load_data )
 							f.seekg(pos_faceoffsets);
@@ -1046,7 +1075,7 @@ int main(int argc, char **argv)
 						fo << "\t\t\t\t</DataArray>" << std::endl;
 						std::streampos pos_faces_running = pos_faces;
 						std::streampos pos_faceoffsets_running = pos_faceoffsets;
-						size_t point, nfaces, npoints, reads;
+						size_t point, nfaces, npoints, reads, point_pos;
 						offset0 = 0;
 						std::cout << "Write cells faces connectivity for partition " << k << std::endl;
 						fo << "\t\t\t\t<DataArray type=\"UInt64\" Name=\"faces\" Format=\"ascii\">" << std::endl;
@@ -1058,7 +1087,7 @@ int main(int argc, char **argv)
 							else
 							{
 								f.seekg(pos_faceoffsets_running);
-								if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1;}
+								if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; break;}
 								f >> offset;
 								pos_faceoffsets_running = f.tellg();
 							}
@@ -1067,7 +1096,7 @@ int main(int argc, char **argv)
 							if( !load_data )
 							{
 								f.seekg(pos_faces_running);
-								if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1; }
+								if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; break; }
 							}
 							if( cpart[m] == k )
 							{
@@ -1093,11 +1122,20 @@ int main(int argc, char **argv)
 											point = faces[offset0+reads];
 										else f >> point;
 										reads++;
-										fo << pnum[point] << " ";
+										
 										if( !(ppart[point] == k || epoints[k].count(point)) )
 											std::cout << "Error, connection to point " << point << " from cell " << m << " didn't get correct part number, got " << ppart[point] << std::endl;
-										if( pnum[point] == mone_size_t )
+									
+										point_pos = mone_size_t;
+										if( ppart[point] == k )
+											point_pos = pnum[point];
+										else if( epoints[k].count(point) )
+											point_pos = epoints[k][point];
+									
+										if( point_pos == mone_size_t )
 											std::cout << "Error, connection to point " << point << " from cell " << m << " was not enumerated" << std::endl;
+										
+										fo << point_pos << " ";
 									}
 									if( reads > size ) std::cout << "Error, something is inconsistent, total reads " << size << " but current reads " << reads << " number of faces " << nfaces << " points in face " << npoints << std::endl;
 								}
@@ -1111,26 +1149,27 @@ int main(int argc, char **argv)
 							if( !load_data )
 							{
 								pos_faces_running = f.tellg();
-								if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1; }
+								if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; break; }
 							}
 						}
 						fo << "\t\t\t\t</DataArray>" << std::endl;
 						
-						std::cout << "Done with cells faces for partition " << k << std::endl;
+						//std::cout << "Done with cells faces for partition " << k << std::endl;
 					}
 					fo << "\t\t\t</Cells>" << std::endl;	
 				}
+				
+				std::cout << "Done with cells faces for partitions " << std::endl;
 			}
 			
 			std::cout << "Write nodes data" << std::endl;
-//#pragma omp parallel for
+			
+			std::cout << "Write nodes part data for partitions " << std::endl;
+#pragma omp parallel for
 			for(int k = 0; k < parts; ++k)
 			{
 				std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
 				fo << "\t\t\t<PointData>" << std::endl;
-				
-				
-				std::cout << "Write nodes part data for partition " << k << std::endl;
 				
 				fo << "\t\t\t\t<DataArray";
 				fo << " type=\"Int32\"";
@@ -1155,19 +1194,16 @@ int main(int argc, char **argv)
 			
 			for(size_t m = 0; m < pointdata_name.size(); ++m)
 			{
-				std::cout << "Writing node data " << pointdata_name[m] << std::endl;
+				std::cout << "Preload node data " << pointdata_name[m] << std::endl;
 				f.seekg(pointdata_pos[m]);
 				if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1;}
 				//preload data here
 				void * data = preloaddata(f,npoints,pointdata_comps[m],pointdata_type[m]);
-//#pragma omp parallel for	
+				std::cout << "Write node data " << pointdata_name[m] << " for partitions " << std::endl;
+#pragma omp parallel for	
 				for(int k = 0; k < parts; ++k)
 				{
-					std::cout << "Prepare nodes for partition " << k << std::endl;
 					std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
-					
-					std::cout << "Write node data " << pointdata_name[m] << " for partition " << k << std::endl;
-					
 					fo << "\t\t\t\t<DataArray";
 					fo << " type=\"" << pointdata_type[m] << "\"";
 					fo << " Name=\"" << pointdata_name[m] << "\"";
@@ -1176,21 +1212,14 @@ int main(int argc, char **argv)
 						fo << " NumberOfComponents=\"" << pointdata_comps[m] << "\"";
 					fo << ">" << std::endl;
 					
-					f.seekg(pointdata_pos[m]);
-					if( f.fail() ) 
-					{
-						std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl;
-						return -1;
-					}
 					transferdata(fo,npoints,pointdata_comps[m],ppart,epoints[k],k,pointdata_type[m],data);
-					
 					fo << "\t\t\t\t</DataArray>" << std::endl;
 				}
 				
 				releasedata(pointdata_type[m],data);
 			}
 			
-//#pragma omp parallel for
+#pragma omp parallel for
 			for(int k = 0; k < parts; ++k)
 			{
 				std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
@@ -1200,10 +1229,10 @@ int main(int argc, char **argv)
 		
 		std::cout << "Write cells data" << std::endl;
 		
-//#pragma omp parallel for
+		std::cout << "Write cell part data for partitions " << std::endl;
+#pragma omp parallel for
 		for(int k = 0; k < parts; ++k)
 		{	
-			std::cout << "Write cell part data for partition " << k << std::endl;
 			std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
 			fo << "\t\t\t<CellData>" << std::endl;
 			fo << "\t\t\t\t<DataArray";
@@ -1229,15 +1258,15 @@ int main(int argc, char **argv)
 			
 		for(size_t m = 0; m < celldata_name.size(); ++m)
 		{
-			std::cout << "Writing cell data " << celldata_name[m] << std::endl;
+			std::cout << "Preload cell data " << celldata_name[m] << std::endl;
 			f.seekg(celldata_pos[m]);
 			if( f.fail() ) {std::cout << __FILE__ << ":" << __LINE__ << " input stream failure " << std::endl; return -1;}
 			//preload data here
 			void * data = preloaddata(f,ncells,celldata_comps[m],celldata_type[m]);
-//#pragma omp parallel for
+			std::cout << "Write cell data " << celldata_name[m] << " for partitions " << std::endl;
+#pragma omp parallel for
 			for(int k = 0; k < parts; ++k)
 			{
-				std::cout << "Write cell data " << celldata_name[m] << " for partition " << k << std::endl;
 				std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
 				fo << "\t\t\t\t<DataArray";
 				fo << " type=\"" << celldata_type[m] << "\"";
@@ -1248,14 +1277,14 @@ int main(int argc, char **argv)
 				fo << ">" << std::endl;
 				
 				
-				transferdata(fo,ncells,celldata_comps[m],cpart,std::set<size_t>(),k,celldata_type[m],data);
+				transferdata(fo,ncells,celldata_comps[m],cpart,std::map<size_t,size_t>(),k,celldata_type[m],data);
 				fo << "\t\t\t\t</DataArray>" << std::endl;
 			}
 			releasedata(celldata_type[m],data);
 		}
 		
 		std::cout << "Finalize cells data" << std::endl;
-//#pragma omp parallel for
+#pragma omp parallel for
 		for(int k = 0; k < parts; ++k)
 		{
 			std::ofstream fo(filenames[k].c_str(),std::ios::app); //append to the end
@@ -1321,7 +1350,7 @@ int main(int argc, char **argv)
 		fh << "</VTKFile>" << std::endl;
 		
 		fh.close();
-		
+		std::cout << "Finished with " << output << std::endl;
 		
 	}
 	return 0;

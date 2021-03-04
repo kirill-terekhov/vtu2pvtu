@@ -51,8 +51,8 @@ class XMLReader
 	std::istream & GetInputStream() {return *inp.back().input;}
 	const std::istream & GetInputStream() const {return *inp.back().input;}
 	//should not share the reference to the stream with another reader
-	XMLReader(const XMLReader & other) {}
-	XMLReader & operator =(XMLReader & other) {return *this;}
+	//XMLReader(const XMLReader & other) = delete;
+	//XMLReader & operator =(XMLReader & other) = delete;
 	char GetChar()
 	{
 		char c = '\0';
