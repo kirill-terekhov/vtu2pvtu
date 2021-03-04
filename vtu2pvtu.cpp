@@ -203,7 +203,7 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		const int max_iterations = 200; //maximum iterations for K-means clustering
+		const int max_iterations = 500; //maximum iterations for K-means clustering
 		std::string input = std::string(argv[1]);
 		std::string output = "output.pvtu";
 		int parts = atoi(argv[2]);
