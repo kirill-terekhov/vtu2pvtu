@@ -723,7 +723,7 @@ int main(int argc, char **argv)
 							//no change in cluster positions
 							if(changed == 0 )
 							{
-								std::cout << "No cluster change after interation - break!" << std::endl;
+								std::cout << "No cluster change after iteration - break!" << std::endl;
 								break;
 							}
 							if( iter >= max_iterations )
