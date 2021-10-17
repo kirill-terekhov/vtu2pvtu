@@ -10,6 +10,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <algorithm>
+#include <stdint.h>
 
 std::string tolower(std::string input)
 {
